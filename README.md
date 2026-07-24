@@ -1,8 +1,9 @@
 # Terminal-tetris
 
-一个运行在终端里的俄罗斯方块游戏，使用 Python 内置 `curses` 库实现，无需额外依赖。
+A Tetris game running in the terminal, implemented with Python's built-in `curses` library with no additional dependencies required.
+Supported Features
 
-## 支持
+## Supported Features
 
 | Rotation System | 7-Bag | Hold | Ghost | Lock Delay | Block color | Marathon |
 | --------------- | ----- | ---- | ----- | ---------- | ----------- | -------- |
