@@ -39,9 +39,6 @@ KEY_NAME_MAP = {
     'ESC':          27,
     'BTAB':         curses.KEY_BTAB,
     'SPACE':        ord(' '),
-    'ENTER':        10,
-    'TAB':          9,
-    'ESC':          27,
 }
 
 DEFAULT_KEY_CONFIG_JSON = {
@@ -60,6 +57,7 @@ DEFAULT_KEY_CONFIG_JSON = {
 
 CONFIG_DIR = os.path.expanduser('~/.config/terminal-tetris')
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
+
 
 def parse_key_name(name):
     """转换为 curses 键码"""
@@ -95,8 +93,8 @@ class Config:
             try:
                 with open(self.path, 'w', encoding='utf-8') as f:
                     json.dump({}, f)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Config] 创建配置文件失败: {e}", file=sys.stderr)
 
     def write(self, key, value):
         """写入配置项"""
@@ -104,14 +102,15 @@ class Config:
         try:
             with open(self.path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-        except Exception:
+        except Exception as e:
+            print(f"[Config] 读取配置失败: {e}", file=sys.stderr)
             data = {}
         data[key] = value
         try:
             with open(self.path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Config] 写入配置失败: {e}", file=sys.stderr)
 
     def read(self, key, default=None):
         """读取配置项如果不存在时写入默认值"""
@@ -119,15 +118,16 @@ class Config:
         try:
             with open(self.path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-        except Exception:
+        except Exception as e:
+            print(f"[Config] 读取配置失败: {e}", file=sys.stderr)
             data = {}
         if key not in data:
             data[key] = default
             try:
                 with open(self.path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=4)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Config] 写入默认配置失败: {e}", file=sys.stderr)
         return data.get(key, default)
 
 
@@ -224,7 +224,6 @@ DEFAULT_STYLE = {
     'border': 'block',
 }
 
-
 SRS_KICKS_JLSTZ = {
     '0->R': [(0, 0), (-1, 0), (-1, +1), (0, -2), (-1, -2)],
     'R->0': [(0, 0), (+1, 0), (+1, -1), (0, +2), (+1, +2)],
@@ -234,6 +233,11 @@ SRS_KICKS_JLSTZ = {
     'L->2': [(0, 0), (-1, 0), (-1, -1), (0, +2), (-1, +2)],
     'L->0': [(0, 0), (-1, 0), (-1, -1), (0, +2), (-1, +2)],
     '0->L': [(0, 0), (+1, 0), (+1, +1), (0, -2), (+1, -2)],
+    # 180° kicks (SRS+/TETR.IO style)
+    '0->2': [(0, 0), (0, 1), (1, 1), (-1, 1), (1, 0), (-1, 0)],
+    '2->0': [(0, 0), (0, -1), (1, -1), (-1, -1), (1, 0), (-1, 0)],
+    'R->L': [(0, 0), (1, 0), (1, -2), (1, -1), (0, -2), (0, -1)],
+    'L->R': [(0, 0), (-1, 0), (-1, -2), (-1, -1), (0, -2), (0, -1)],
 }
 
 SRS_KICKS_I = {
@@ -245,6 +249,11 @@ SRS_KICKS_I = {
     'L->2': [(0, 0), (-2, 0), (+1, 0), (-2, -1), (+1, +2)],
     'L->0': [(0, 0), (+1, 0), (-2, 0), (+1, -2), (-2, +1)],
     '0->L': [(0, 0), (-1, 0), (+2, 0), (-1, +2), (+2, -1)],
+    # 180° kicks
+    '0->2': [(0, 0), (0, 1), (0, -1)],
+    '2->0': [(0, 0), (0, 1), (0, -1)],
+    'R->L': [(0, 0), (1, 0), (-1, 0)],
+    'L->R': [(0, 0), (1, 0), (-1, 0)],
 }
 
 SRS_KICKS_O = {}
@@ -334,7 +343,8 @@ class AudioPlayer:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except Exception:
+        except Exception as e:
+            print(f"[Audio] 播放失败: {e}", file=sys.stderr)
             self.process = None
 
     def stop(self):
@@ -382,6 +392,9 @@ class Piece:
 
 
 class TetrisGame:
+    MIN_COLS = 42
+    MIN_LINES = 24
+
     def __init__(self, stdscr, audio=None, key_config=None):
         self.stdscr = stdscr
         self.audio = audio
@@ -493,6 +506,9 @@ class TetrisGame:
             self.current_piece.x += dx
             self.current_piece.y += dy
             self._update_ghost()
+            # 软降得分：每格 1 分
+            if dy > 0:
+                self.score += dy
             if self.lock_counter is not None and self.lock_resets < self._get_max_lock_resets():
                 self.lock_counter = 0
                 self.lock_resets += 1
@@ -604,7 +620,7 @@ class TetrisGame:
     def handle_input(self):
         try:
             key = self.stdscr.getch()
-        except:
+        except Exception:
             return False
         if key == -1:
             return False
@@ -717,7 +733,7 @@ class TetrisGame:
                     sx = start_x + dx * 2 + 1
                     sys.stdout.write(f'{a.cursor(sy, sx)}{a.fg(r, g, b)}{a.bold()}{DISPLAY_CHARS["block"]}{a.reset()}')
 
-    def _safe_addstr(self, y, x, text, bold=False, dim=False, reverse=False):
+    def _draw_text(self, y, x, text, bold=False, dim=False, reverse=False):
         a = Ansi()
         styles = ''
         if bold:
@@ -762,8 +778,8 @@ class TetrisGame:
         ]
 
     def draw(self):
-        self.stdscr.clear()
-        self.stdscr.refresh()
+        # 使用 ANSI 清屏，避免 curses clear/refresh 与 ANSI 混用导致闪烁
+        sys.stdout.write(Ansi().clear_screen())
         sys.stdout.write(Ansi().hide_cursor())
 
         controls = self._get_controls_text()
@@ -773,12 +789,12 @@ class TetrisGame:
 
         bw = self.board_width
         bh = self.board_height
-        self._safe_addstr(self.disp_y, self.disp_x,
+        self._draw_text(self.disp_y, self.disp_x,
                            border_char[0] + border_char[1] * 2 * bw + border_char[2], bold=True)
         for y in range(bh):
-            self._safe_addstr(self.disp_y + 1 + y, self.disp_x, border_char[3], bold=True)
-            self._safe_addstr(self.disp_y + 1 + y, self.disp_x + 1 + bw * 2, border_char[4], bold=True)
-        self._safe_addstr(self.disp_y + 1 + bh, self.disp_x,
+            self._draw_text(self.disp_y + 1 + y, self.disp_x, border_char[3], bold=True)
+            self._draw_text(self.disp_y + 1 + y, self.disp_x + 1 + bw * 2, border_char[4], bold=True)
+        self._draw_text(self.disp_y + 1 + bh, self.disp_x,
                            border_char[5] + border_char[6] * 2 * bw + border_char[7], bold=True)
 
         for y in range(bh):
@@ -804,45 +820,62 @@ class TetrisGame:
         info_x = self.disp_x + 1 + bw * 2 + 4
         info_y = self.disp_y
 
-        self._safe_addstr(info_y + 1, info_x, 'Next:', bold=True)
+        self._draw_text(info_y + 1, info_x, 'Next:', bold=True)
         self._draw_mini_piece(info_y + 3, info_x, self.next_piece_name, SHAPE_COLORS[self.next_piece_name])
 
-        self._safe_addstr(info_y + 6, info_x, 'Hold:', bold=True)
+        self._draw_text(info_y + 6, info_x, 'Hold:', bold=True)
         if self.held_piece_name:
             self._draw_mini_piece(info_y + 8, info_x, self.held_piece_name, SHAPE_COLORS[self.held_piece_name])
 
         game_info_y = info_y + 11
-        self._safe_addstr(game_info_y + 0, info_x, f'Score: {self.score}', bold=True)
-        self._safe_addstr(game_info_y + 1, info_x, f'Lines: {self.lines}', bold=True)
-        self._safe_addstr(game_info_y + 2, info_x, f'Level: {self.level}', bold=True)
+        self._draw_text(game_info_y + 0, info_x, f'Score: {self.score}', bold=True)
+        self._draw_text(game_info_y + 1, info_x, f'Lines: {self.lines}', bold=True)
+        self._draw_text(game_info_y + 2, info_x, f'Level: {self.level}', bold=True)
         lr_max = self._get_max_lock_resets()
         lr = lr_max - self.lock_resets
-        self._safe_addstr(game_info_y + 3, info_x, f'Lock Resets: {'◇' * lr_max}', dim=True)
-        self._safe_addstr(game_info_y + 3, info_x, f'Lock Resets: {'◆' * lr}', bold=True)
+        # 合并为一次输出，避免终端清行不一致
+        resets_text = f"Lock Resets: {'◆' * lr}{'◇' * (lr_max - lr)}"
+        self._draw_text(game_info_y + 3, info_x, resets_text, bold=True)
 
         for i, ctrl in enumerate(controls):
-            self._safe_addstr(info_y + 16 + i, info_x, ctrl, dim=True)
+            self._draw_text(info_y + 16 + i, info_x, ctrl, dim=True)
 
         if self.paused:
             msg = ' P A U S E D '
             my = self.disp_y + 1 + bh // 2
             mx = self.disp_x + 1 + bw - len(msg) // 2
-            self._safe_addstr(my, mx, msg, bold=True, reverse=True)
-            self._safe_addstr(my + 1, mx - 2, 'Press P to resume', dim=True)
+            self._draw_text(my, mx, msg, bold=True, reverse=True)
+            self._draw_text(my + 1, mx - 2, 'Press P to resume', dim=True)
 
         if self.game_over:
             msg = 'GAME OVER'
             my = self.disp_y + 1 + bh // 2 - 1
             mx = self.disp_x + 1 + bw - len(msg) // 2 + 1
-            self._safe_addstr(my, mx, msg, bold=True, reverse=True)
-            self._safe_addstr(my + 1, mx - 3, f'Final Score: {self.score}', bold=True)
-            self._safe_addstr(my + 2, mx - 4, 'Press R to restart', dim=True)
-            self._safe_addstr(my + 3, mx - 3, 'Press Q to quit', dim=True)
+            self._draw_text(my, mx, msg, bold=True, reverse=True)
+            self._draw_text(my + 1, mx - 3, f'Final Score: {self.score}', bold=True)
+            self._draw_text(my + 2, mx - 4, 'Press R to restart', dim=True)
+            self._draw_text(my + 3, mx - 3, 'Press Q to quit', dim=True)
 
         sys.stdout.flush()
 
+    def _check_terminal_size(self):
+        """检查终端是否足够大"""
+        rows, cols = self.stdscr.getmaxyx()
+        if rows < self.MIN_LINES or cols < self.MIN_COLS:
+            return False, rows, cols
+        return True, rows, cols
 
     def run(self):
+        ok, rows, cols = self._check_terminal_size()
+        if not ok:
+            sys.stdout.write(Ansi().clear_screen())
+            sys.stdout.write(Ansi().show_cursor())
+            sys.stdout.flush()
+            print(f"\n终端窗口太小: {rows}x{cols}")
+            print(f"需要至少: {self.MIN_LINES}x{self.MIN_COLS}")
+            print("请放大终端后重新运行。\n")
+            return
+
         try:
             if self.audio:
                 self.audio.play()
